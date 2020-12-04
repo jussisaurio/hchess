@@ -9,7 +9,7 @@ import Control.Monad.Except (MonadIO (liftIO))
 import qualified Control.Monad.State as S
 import Control.Monad.Trans.State (StateT, evalStateT, put)
 import Data.Char (toUpper)
-import Data.List ()
+import Data.Either (isRight)
 import Data.Maybe
 import Data.Vector ((!), (!?))
 import qualified Data.Vector as Vector
@@ -17,9 +17,11 @@ import LegalMoves
   ( diagonalMove,
     diagonalOneDown,
     diagonalOneUp,
+    getUnitVector,
     horizontalMove,
     kingMove,
     knightMove,
+    legalCapturePatterns,
     oneDown,
     oneUp,
     pawnCapture,
@@ -80,12 +82,36 @@ destinationNotOccupiedByOwnPiece board dst (Piece color pt) =
 
 isOwnPiece player (Piece color pt) = if player == color then Right (Piece color pt) else Left "Cannot move opponent's piece"
 
+canReachSquare :: Board -> Int -> Int -> Bool
+canReachSquare board dst idx = hasEligiblePattern && isRight (nothingIsInTheWay board idx dst piece)
+  where
+    piece = fromJust $ (board ! idx)
+    capturePatterns = legalCapturePatterns piece
+    hasEligiblePattern = any (\p -> p idx dst) capturePatterns
+
+findOpponentsThreateningSquare :: Board -> Int -> [Piece]
+findOpponentsThreateningSquare board sqr = Vector.toList $ Vector.map (fromJust . (!) board) . Vector.filter (canReachSquare board sqr) $ opponentIndices
+  where
+    (Piece kingColor _) = fromJust $ board ! sqr
+    opponentColor = if kingColor == White then Black else White
+    opponentIndices = Vector.findIndices (\sq -> isJust sq && let (Piece c t) = fromJust sq in c == opponentColor) board
+
+isCheck :: Board -> Maybe Color
+isCheck board = if null kingLocations then Nothing else (\(Piece c _) -> c) . fromJust . (!) board <$> Vector.find ((<) 0 . length . findOpponentsThreateningSquare board) kingLocations
+  where
+    kingLocations = Vector.findIndices (\it -> isJust it && let (Piece c t) = fromJust it in t == King) startingBoard
+
 -- todo enpassant
 canCapture board src dst (Piece color pt1) =
   let _canCapture = \case
         Nothing -> Right (Piece color pt1, Nothing)
         Just (Piece color2 pt2) -> if pt1 /= Pawn || pawnCapture (Piece color pt1) src dst then Right (Piece color pt1, Just $ Piece color2 pt2) else Left "illegal capture"
    in maybe (Left "off the board") _canCapture (board !? dst)
+
+moveWontCauseCheckOnOwnKing board player src dst piece =
+  maybe (Right newBoard) (\clr -> if clr == player then Left "Illegal move: player's own king would be exposed" else Right newBoard) $ isCheck newBoard
+  where
+    newBoard = Vector.update board (Vector.fromList [(src, Nothing), (dst, Just piece)])
 
 _move board player src dst =
   maybe (Left "illegal") Right (board !? src)
@@ -95,7 +121,9 @@ _move board player src dst =
     >>= nothingIsInTheWay board src dst
     >>= destinationNotOccupiedByOwnPiece board dst
     >>= canCapture board src dst
-    >>= \(piece, maybeCapture) -> Right $ (Vector.update board (Vector.fromList [(src, Nothing), (dst, Just piece)]), maybeCapture)
+    >>= \(piece, maybeCapture) ->
+      moveWontCauseCheckOnOwnKing board player src dst piece
+        >>= \newBoard -> Right $ (newBoard, maybeCapture)
 
 within min max n = n >= min && n <= max
 
@@ -158,7 +186,6 @@ gameLoop = do
 play = evalStateT gameLoop newGame >>= print
 
 -- TODO (at least):
--- disallow moving king to threatened square
 -- pawn enpassant
 -- castling
 -- disallow castling if king or rook has moved

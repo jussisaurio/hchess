@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module LegalMoves where
 
 import Pieces
@@ -61,3 +63,13 @@ takeStep src dst = let (xstep, ystep) = getUnitVector src dst in src + xstep + y
 
 steps src dst =
   let go s t = if s == dst then t else go (takeStep s dst) (t + 1) in go src 0
+
+legalCapturePatterns (Piece c t) =
+  case (c, t) of
+    (White, Pawn) -> [diagonalOneUp]
+    (Black, Pawn) -> [diagonalOneDown]
+    (_, Rook) -> [horizontalMove, verticalMove]
+    (_, Knight) -> [knightMove]
+    (_, Bishop) -> [diagonalMove]
+    (_, Queen) -> [horizontalMove, verticalMove, diagonalMove]
+    (_, King) -> [kingMove]
