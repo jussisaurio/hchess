@@ -10,6 +10,7 @@ import qualified Control.Monad.State as S
 import Control.Monad.Trans.State (StateT, evalStateT, put)
 import Data.Char (toUpper)
 import Data.Either (isRight)
+import Data.List (find)
 import Data.Maybe
 import Data.Vector ((!), (!?))
 import qualified Data.Vector as Vector
@@ -17,11 +18,11 @@ import LegalMoves
   ( diagonalMove,
     diagonalOneDown,
     diagonalOneUp,
-    getUnitVector,
     horizontalMove,
     kingMove,
     knightMove,
     legalCapturePatterns,
+    legalMovementPatterns,
     oneDown,
     oneUp,
     pawnCapture,
@@ -47,23 +48,10 @@ pawnsRow = replicate 8 Pawn
 startingBoard :: Board
 startingBoard = Vector.fromList $ map (Just . Piece White) bigPiecesRow ++ map (Just . Piece White) pawnsRow ++ replicate 32 Nothing ++ map (Just . Piece Black) pawnsRow ++ map (Just . Piece Black) bigPiecesRow
 
-legalMovementPattern
-  src
-  dst
-  piece =
-    if dst < 0 || dst > 63
-      then Left "off the board"
-      else
-        let illegalMovementPattern = Left $ "illegal movement pattern for " ++ show piece
-         in let test p = if p src dst then Right piece else illegalMovementPattern
-             in case piece of
-                  Piece Black Pawn -> test oneDown <|> test diagonalOneDown <|> test twoDownBlackPawn
-                  Piece White Pawn -> test oneUp <|> test diagonalOneUp <|> test twoUpWhitePawn
-                  Piece _ Rook -> test horizontalMove <|> test verticalMove
-                  Piece _ Knight -> test knightMove
-                  Piece _ Bishop -> test diagonalMove
-                  Piece _ Queen -> test horizontalMove <|> test verticalMove <|> test diagonalMove
-                  Piece _ King -> test kingMove -- todo castling
+legalMovementPattern src dst piece
+  | dst < 0 || dst > 63 = Left "off the board"
+  | any (\p -> p src dst) $ legalMovementPatterns piece = Right piece
+  | otherwise = Left $ "illegal movement pattern for " ++ show piece
 
 nothingIsInTheWay board src dst (Piece color pt) =
   case pt of
@@ -96,10 +84,18 @@ findOpponentsThreateningSquare board sqr = Vector.toList $ Vector.map (fromJust 
     opponentColor = if kingColor == White then Black else White
     opponentIndices = Vector.findIndices (\sq -> isJust sq && let (Piece c t) = fromJust sq in c == opponentColor) board
 
-isCheck :: Board -> Maybe Color
-isCheck board = if null kingLocations then Nothing else (\(Piece c _) -> c) . fromJust . (!) board <$> Vector.find ((<) 0 . length . findOpponentsThreateningSquare board) kingLocations
+isCheckOn :: Board -> Color -> Bool
+isCheckOn board player =
+  (Just player ==) $ (\(Piece c _) -> c) . fromJust . (!) board <$> Vector.find ((<) 0 . length . findOpponentsThreateningSquare board) kingLocations
   where
     kingLocations = Vector.findIndices (\it -> isJust it && let (Piece c t) = fromJust it in t == King) startingBoard
+
+maybeCheck :: Board -> Maybe Color
+maybeCheck board = find (isCheckOn board) [White, Black]
+
+checkmate board = maybe False (const False) $ maybeCheck board -- TODO
+
+stalemate board = maybe False (const False) $ maybeCheck board -- TODO
 
 -- todo enpassant
 canCapture board src dst (Piece color pt1) =
@@ -109,18 +105,14 @@ canCapture board src dst (Piece color pt1) =
    in maybe (Left "off the board") _canCapture (board !? dst)
 
 moveWouldNeutralizeCheckIfThereIsOne board player src dst piece =
-  maybe (Right ()) checkNeutralize (isCheck board)
+  if isCheckOn board player && isCheckOn newBoard player
+    then Left "There is a check on your king, you must neutralize the threat"
+    else Right ()
   where
-    checkNeutralize color =
-      if color /= player
-        then Right ()
-        else maybe (Right ()) doesNewBoardHaveCheck (isCheck newBoard)
-    doesNewBoardHaveCheck color =
-      if color /= player then Right () else Left "There is a check on your king, you must neutralize the threat"
     newBoard = Vector.update board (Vector.fromList [(src, Nothing), (dst, Just piece)])
 
 moveWontCauseCheckOnOwnKing board player src dst piece =
-  maybe (Right newBoard) (\clr -> if clr == player then Left "Illegal move: player's own king would be exposed" else Right newBoard) $ isCheck newBoard
+  if isCheckOn newBoard player then Left "Illegal move: player's own king would be exposed" else Right newBoard
   where
     newBoard = Vector.update board (Vector.fromList [(src, Nothing), (dst, Just piece)])
 
@@ -185,14 +177,20 @@ gameLoop :: StateT GameState IO Status
 gameLoop = do
   state <- S.get
   _ <- liftIO $ mapM_ (print . getPrintableRow) (getRowsTopFirst (board state))
-  src <- liftIO $ putStrLn ((show $ whoseTurn state) ++ ", which square to move: ") >> getLine
-  dst <- liftIO $ putStrLn ((show $ whoseTurn state) ++ ", target square: ") >> getLine
-  case move (board state) (whoseTurn state) src dst of
-    Left err -> do
-      _ <- liftIO $ print $ "Error: " ++ err
-      gameLoop
-    Right (newBoard, maybeCapture) -> do
-      put $ state {board = newBoard, whoseTurn = if whoseTurn state == White then Black else White, captured = maybe (captured state) (: captured state) maybeCapture}
-      gameLoop
+  case checkmate (board state) of
+    Just player -> return $ Winner player
+    Nothing ->
+      if stalemate (board state)
+        then return Stalemate
+        else do
+          src <- liftIO $ putStrLn ((show $ whoseTurn state) ++ ", which square to move: ") >> getLine
+          dst <- liftIO $ putStrLn ((show $ whoseTurn state) ++ ", target square: ") >> getLine
+          case move (board state) (whoseTurn state) src dst of
+            Left err -> do
+              _ <- liftIO $ print $ "Error: " ++ err
+              gameLoop
+            Right (newBoard, maybeCapture) -> do
+              put $ state {board = newBoard, whoseTurn = if whoseTurn state == White then Black else White, captured = maybe (captured state) (: captured state) maybeCapture}
+              gameLoop
 
 play = evalStateT gameLoop newGame >>= print

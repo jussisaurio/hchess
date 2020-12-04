@@ -64,6 +64,16 @@ takeStep src dst = let (xstep, ystep) = getUnitVector src dst in src + xstep + y
 steps src dst =
   let go s t = if s == dst then t else go (takeStep s dst) (t + 1) in go src 0
 
+legalMovementPatterns (Piece c t) =
+  case (c, t) of
+    (White, Pawn) -> [diagonalOneUp, oneUp, twoUpWhitePawn]
+    (Black, Pawn) -> [diagonalOneDown, oneDown, twoDownBlackPawn]
+    (_, Rook) -> [horizontalMove, verticalMove]
+    (_, Knight) -> [knightMove]
+    (_, Bishop) -> [diagonalMove]
+    (_, Queen) -> [horizontalMove, verticalMove, diagonalMove]
+    (_, King) -> [kingMove]
+
 legalCapturePatterns (Piece c t) =
   case (c, t) of
     (White, Pawn) -> [diagonalOneUp]
