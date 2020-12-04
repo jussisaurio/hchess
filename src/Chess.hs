@@ -108,6 +108,17 @@ canCapture board src dst (Piece color pt1) =
         Just (Piece color2 pt2) -> if pt1 /= Pawn || pawnCapture (Piece color pt1) src dst then Right (Piece color pt1, Just $ Piece color2 pt2) else Left "illegal capture"
    in maybe (Left "off the board") _canCapture (board !? dst)
 
+moveWouldNeutralizeCheckIfThereIsOne board player src dst piece =
+  maybe (Right ()) checkNeutralize (isCheck board)
+  where
+    checkNeutralize color =
+      if color /= player
+        then Right ()
+        else maybe (Right ()) doesNewBoardHaveCheck (isCheck newBoard)
+    doesNewBoardHaveCheck color =
+      if color /= player then Right () else Left "There is a check on your king, you must neutralize the threat"
+    newBoard = Vector.update board (Vector.fromList [(src, Nothing), (dst, Just piece)])
+
 moveWontCauseCheckOnOwnKing board player src dst piece =
   maybe (Right newBoard) (\clr -> if clr == player then Left "Illegal move: player's own king would be exposed" else Right newBoard) $ isCheck newBoard
   where
@@ -122,8 +133,9 @@ _move board player src dst =
     >>= destinationNotOccupiedByOwnPiece board dst
     >>= canCapture board src dst
     >>= \(piece, maybeCapture) ->
-      moveWontCauseCheckOnOwnKing board player src dst piece
-        >>= \newBoard -> Right $ (newBoard, maybeCapture)
+      moveWouldNeutralizeCheckIfThereIsOne board player src dst piece
+        >> moveWontCauseCheckOnOwnKing board player src dst piece
+          >>= \newBoard -> Right (newBoard, maybeCapture)
 
 within min max n = n >= min && n <= max
 
@@ -184,10 +196,3 @@ gameLoop = do
       gameLoop
 
 play = evalStateT gameLoop newGame >>= print
-
--- TODO (at least):
--- pawn enpassant
--- castling
--- disallow castling if king or rook has moved
--- disallow castling if threatened squares
--- promotion
