@@ -10,7 +10,8 @@ import qualified Control.Monad.State as S
 import Control.Monad.Trans.State (StateT, evalStateT, put)
 import Data.Char (toUpper)
 import Data.List ()
-import Data.Vector ((!?))
+import Data.Maybe
+import Data.Vector ((!), (!?))
 import qualified Data.Vector as Vector
 import LegalMoves
   ( diagonalMove,
@@ -22,6 +23,8 @@ import LegalMoves
     oneDown,
     oneUp,
     pawnCapture,
+    steps,
+    takeStep,
     twoDownBlackPawn,
     twoUpWhitePawn,
     verticalMove,
@@ -60,6 +63,15 @@ legalMovementPattern
                   Piece _ Queen -> test horizontalMove <|> test verticalMove <|> test diagonalMove
                   Piece _ King -> test kingMove -- todo castling
 
+nothingIsInTheWay board src dst (Piece color pt) =
+  case pt of
+    Knight -> Right piece
+    _ -> if walk steps' src then Right piece else Left "Path is blocked"
+  where
+    piece = Piece color pt
+    steps' = steps src dst - 1
+    walk st cur = st == 0 || let next = takeStep cur dst in isNothing (board ! next) && walk (st - 1) next
+
 destinationNotOccupiedByOwnPiece board dst (Piece color pt) =
   let _notOcc = \case
         Nothing -> Right (Piece color pt)
@@ -80,6 +92,7 @@ _move board player src dst =
     >>= maybe (Left "no piece") Right
     >>= isOwnPiece player
     >>= legalMovementPattern src dst
+    >>= nothingIsInTheWay board src dst
     >>= destinationNotOccupiedByOwnPiece board dst
     >>= canCapture board src dst
     >>= \(piece, maybeCapture) -> Right $ (Vector.update board (Vector.fromList [(src, Nothing), (dst, Just piece)]), maybeCapture)

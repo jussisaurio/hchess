@@ -18,10 +18,46 @@ horizontalMove src dst = src `div` 8 == dst `div` 8
 
 verticalMove src dst = src `mod` 8 == dst `mod` 8
 
-diagonalMove src dst = src `mod` 8 - dst `mod` 8 == src `div` 8 - dst `div` 8
+diagonalMove src dst = abs (src `mod` 8 - dst `mod` 8) == abs (src `div` 8 - dst `div` 8)
 
 kingMove src dst = src /= dst && abs (src `div` 8 - dst `div` 8) < 2 && abs (src `mod` 8 - dst `mod` 8) < 2
 
 knightMove src dst = abs (src `div` 8 - dst `div` 8) == 2 && abs (src `mod` 8 - dst `mod` 8) == 1 || abs (src `div` 8 - dst `div` 8) == 1 && abs (src `mod` 8 - dst `mod` 8) == 2
 
 pawnCapture (Piece color pt) src dst = pt == Pawn && if color == White then diagonalOneUp src dst else diagonalOneDown src dst
+
+getUnitVector src dst = (if xdiff == 0 then xdiff else xdiff `div` abs xdiff, if ydiff == 0 then ydiff else ydiff `div` abs ydiff)
+  where
+    xdiff = dst `mod` 8 - src `mod` 8
+    ydiff = dst `div` 8 - src `div` 8
+
+combineTuple (f1, s1) (f2, s2) = (f1 + f2, s1 + s2)
+
+upUV = (0, 1)
+
+downUV = (0, -1)
+
+leftUV = (0, -1)
+
+rightUV = (0, 1)
+
+neUV = combineTuple leftUV upUV
+
+nwUV = combineTuple rightUV upUV
+
+seUV = combineTuple leftUV downUV
+
+swUV = combineTuple rightUV downUV
+
+diagonalUVs = [neUV, nwUV, seUV, swUV]
+
+horizontalUVs = [leftUV, rightUV]
+
+verticalUVs = [upUV, downUV]
+
+horizontalUnitVector = (1, 0)
+
+takeStep src dst = let (xstep, ystep) = getUnitVector src dst in src + xstep + ystep * 8
+
+steps src dst =
+  let go s t = if s == dst then t else go (takeStep s dst) (t + 1) in go src 0
