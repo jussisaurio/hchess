@@ -5,6 +5,7 @@
 module Chess where
 
 import Board (Board, startingBoard)
+import Control.Applicative (Alternative ((<|>)))
 import Control.Monad.Except (MonadIO (liftIO))
 import qualified Control.Monad.State as S
 import Control.Monad.Trans.State (StateT, evalStateT, put)
@@ -21,7 +22,7 @@ import Pieces
     PieceType (King, Knight, Pawn),
   )
 import Text.Read (readEither)
-import qualified UI as UI
+import qualified UI
 
 legalMovementPattern src dst piece
   | src == dst = Left "Cannot choose not to move"
@@ -69,46 +70,58 @@ isCheckOn board player =
 maybeCheck :: Board -> Maybe Color
 maybeCheck board = find (isCheckOn board) [White, Black]
 
-tryMove board player piece src unrestricted (xdiff, ydiff) =
+tryMove state piece src unrestricted (xdiff, ydiff) =
   let go dst' acc
         | dst' < 0 || dst' > 63 = acc
-        | isRight $ _move board player src dst' =
+        | isRight $ _move state src dst' =
           if unrestricted
             then go (dst' + (ydiff * 8) + xdiff) ((piece, src, dst') : acc)
             else [(piece, src, dst')]
         | otherwise = acc
    in go (src + (ydiff * 8) + xdiff) []
 
-possibleMovesFor board player (Piece color pt) src =
+possibleMovesFor state (Piece color pt) src =
   let (vectors, unrestricted) = unitVectorsFor piece isUnmovedPawn
       isUnmovedPawn = pt == Pawn && src `div` 8 == if color == White then 1 else 6
       piece = Piece color pt
-      moves = concatMap (tryMove board player piece src unrestricted) vectors
+      moves = concatMap (tryMove state piece src unrestricted) vectors
    in moves
 
 -- TODO Dirty, but it works for now. Refactor later
-canMoveSomewhere board player = (<) 0 . length $ Vector.filter (\(pc, src) -> not $ null $ possibleMovesFor board player pc src) piecesAndSquares
+canMoveSomewhere state = (<) 0 . length $ Vector.filter (\(pc, src) -> not $ null $ possibleMovesFor state pc src) piecesAndSquares
   where
-    piecesAndSquares = Vector.map (\i -> (fromJust $ board ! i, i)) . Vector.findIndices (\mp -> isJust mp && let (Piece color _) = fromJust mp in color == player) $ board
+    board' = board state
+    player' = whoseTurn state
+    piecesAndSquares = Vector.map (\i -> (fromJust $ board' ! i, i)) . Vector.findIndices (\mp -> isJust mp && let (Piece color _) = fromJust mp in color == player') $ board'
 
 otherColor color = if color == White then Black else White
 
-checkmate board = maybeCheck board >>= \player -> if not $ canMoveSomewhere board player then Just $ otherColor player else Nothing
+checkmate state = maybeCheck (board state) >>= \player -> if not $ canMoveSomewhere state then Just $ otherColor player else Nothing
 
-stalemate board player = case maybeCheck board of
+stalemate state = case maybeCheck (board state) of
   (Just _) -> False
-  Nothing -> not $ canMoveSomewhere board player
+  Nothing -> not $ canMoveSomewhere state
 
--- todo enpassant
-canCapture board src dst (Piece color pt1) =
+tryEnpassant (Piece color pt1) maybeEnpassant src' dst' =
+  case maybeEnpassant of
+    Nothing -> Left "enpassant not possible"
+    Just mov ->
+      let acceptedPattern = if color == White then diagonalOneUp src' dst' else diagonalOneDown src' dst'
+          correctLocation = if color == White then oneUp (dst mov) dst' else oneDown (dst mov) dst'
+       in if acceptedPattern && correctLocation then Right (Piece color pt1, Just (pc mov, dst mov)) else Left "enpassant not possible"
+
+canCapture board maybeEnpassant src dst (Piece color pt1) =
   let _canCapture = \case
-        Nothing -> if pt1 /= Pawn || legalPawnNonCaptureMove (Piece color pt1) src dst then Right (Piece color pt1, Nothing) else Left "illegal move"
+        Nothing ->
+          if pt1 /= Pawn || legalPawnNonCaptureMove (Piece color pt1) src dst
+            then Right (Piece color pt1, Nothing)
+            else tryEnpassant (Piece color pt1) maybeEnpassant src dst <|> Left "illegal move"
         Just (Piece color2 pt2) ->
           if pt2 == King
             then Left "Programmer error, should not be able to capture king in-game"
             else
               if pt1 /= Pawn || pawnCapture (Piece color pt1) src dst
-                then Right (Piece color pt1, Just $ Piece color2 pt2)
+                then Right (Piece color pt1, Just (Piece color2 pt2, dst))
                 else Left "illegal capture"
    in maybe (Left "off the board") _canCapture (board !? dst)
 
@@ -119,17 +132,31 @@ moveDoesNotLeaveKingExposed board player src dst piece =
   where
     newBoard = Vector.update board (Vector.fromList [(src, Nothing), (dst, Just piece)])
 
-_move board player src dst =
-  maybe (Left "illegal") Right (board !? src)
-    >>= maybe (Left "no piece") Right
-    >>= isOwnPiece player
-    >>= legalMovementPattern src dst
-    >>= nothingIsInTheWay board src dst
-    >>= destinationNotOccupiedByOwnPiece board dst
-    >>= canCapture board src dst
-    >>= \(piece, maybeCapture) ->
-      moveDoesNotLeaveKingExposed board player src dst piece
-        >>= \newBoard -> Right (newBoard, maybeCapture)
+enpassant move = pt == Pawn && pawnFirstMove && pawnDidDoubleMove
+  where
+    (Piece color pt) = pc move
+    pawnFirstMove = src move `div` 8 == if color == White then 1 else 6
+    pawnDidDoubleMove = pawnFirstMove && dst move `div` 8 == if color == White then 3 else 4
+
+ensureCapturedPieceRemoved board maybeCapture =
+  case maybeCapture of
+    Nothing -> board
+    Just (piece, ind) -> if (board ! ind) == Just piece then Vector.update board (Vector.fromList [(ind, Nothing)]) else board
+
+_move state src dst =
+  let board' = board state
+      player = whoseTurn state
+      enpassantPossibleOn = if null (moves state) || not (enpassant $ head $ moves state) then Nothing else Just $ head $ moves state
+   in maybe (Left "illegal") Right (board' !? src)
+        >>= maybe (Left "no piece") Right
+        >>= isOwnPiece player
+        >>= legalMovementPattern src dst
+        >>= nothingIsInTheWay board' src dst
+        >>= destinationNotOccupiedByOwnPiece board' dst
+        >>= canCapture board' enpassantPossibleOn src dst
+        >>= \(piece, maybeCapture) ->
+          moveDoesNotLeaveKingExposed board' player src dst piece
+            >>= \newBoard -> Right (ensureCapturedPieceRemoved newBoard maybeCapture, Move {pc = piece, src = src, dst = dst}, maybeCapture)
 
 toIndex sq =
   if length sq < 2
@@ -139,35 +166,42 @@ toIndex sq =
       row <- readEither (tail sq) >>= \r -> if r > 0 && r < 9 then Right r else Left $ "Invalid row " ++ show r
       pure ((row - 1) * 8 + col)
 
-move board player src dst = do
+move state src dst = do
   src' <- toIndex src
   dst' <- toIndex dst
-  _move board player src' dst'
+  _move state src' dst'
+
+data Move = Move
+  { pc :: Piece,
+    src :: Int,
+    dst :: Int
+  }
+  deriving (Eq, Show)
 
 data Status = Winner Color | Stalemate | InProgress deriving (Eq, Show)
 
-data GameState = GS {whoseTurn :: Color, board :: Board, result :: Status, currentTurn :: Integer, captured :: [Piece]} deriving (Eq, Show)
+data GameState = GS {whoseTurn :: Color, board :: Board, result :: Status, currentTurn :: Integer, moves :: [Move], captured :: [Piece]} deriving (Eq, Show)
 
-newGame = GS {whoseTurn = White, board = startingBoard, result = InProgress, currentTurn = 0, captured = []}
+newGame = GS {whoseTurn = White, board = startingBoard, result = InProgress, currentTurn = 0, moves = [], captured = []}
 
 gameLoop :: StateT GameState IO Status
 gameLoop = do
   state <- S.get
   _ <- liftIO $ UI.printBoard (board state)
-  case checkmate (board state) of
+  case checkmate state of
     Just player -> return $ Winner player
     Nothing ->
-      if stalemate (board state) (whoseTurn state)
+      if stalemate state
         then return Stalemate
         else do
           src <- liftIO $ UI.askSourceSquare (whoseTurn state)
           dst <- liftIO $ UI.askDestinationSquare (whoseTurn state)
-          case move (board state) (whoseTurn state) src dst of
+          case move state src dst of
             Left err -> do
               _ <- liftIO $ UI.printError err
               gameLoop
-            Right (newBoard, maybeCapture) -> do
-              put $ state {board = newBoard, whoseTurn = otherColor (whoseTurn state), captured = maybe (captured state) (: captured state) maybeCapture}
+            Right (newBoard, move, maybeCapture) -> do
+              put $ state {board = newBoard, whoseTurn = otherColor (whoseTurn state), moves = move : moves state, captured = maybe (captured state) ((: captured state) . fst) maybeCapture}
               gameLoop
 
 play = evalStateT gameLoop newGame >>= print
