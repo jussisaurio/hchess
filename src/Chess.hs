@@ -4,50 +4,24 @@
 
 module Chess where
 
+import Board (Board, startingBoard)
 import Control.Monad.Except (MonadIO (liftIO))
 import qualified Control.Monad.State as S
 import Control.Monad.Trans.State (StateT, evalStateT, put)
-import Data.Char (toUpper)
 import Data.Either (isRight)
 import Data.List (find)
 import Data.Maybe
 import Data.Vector ((!), (!?))
 import qualified Data.Vector as Vector
-import Debug.Trace
+import Helpers
 import LegalMoves
-  ( diagonalMove,
-    diagonalOneDown,
-    diagonalOneUp,
-    horizontalMove,
-    kingMove,
-    knightMove,
-    legalCapturePatterns,
-    legalMovementPatterns,
-    legalPawnNonCaptureMove,
-    oneDown,
-    oneUp,
-    pawnCapture,
-    steps,
-    takeStep,
-    twoDownBlackPawn,
-    twoUpWhitePawn,
-    verticalMove,
-  )
 import Pieces
   ( Color (..),
     Piece (..),
-    PieceType (Bishop, King, Knight, Pawn, Queen, Rook),
+    PieceType (King, Knight, Pawn),
   )
 import Text.Read (readEither)
-
-type Board = Vector.Vector (Maybe Piece)
-
-bigPiecesRow = [Rook, Knight, Bishop, Queen, King, Bishop, Knight, Rook]
-
-pawnsRow = replicate 8 Pawn
-
-startingBoard :: Board
-startingBoard = Vector.fromList $ map (Just . Piece White) bigPiecesRow ++ map (Just . Piece White) pawnsRow ++ replicate 32 Nothing ++ map (Just . Piece Black) pawnsRow ++ map (Just . Piece Black) bigPiecesRow
+import qualified UI as UI
 
 legalMovementPattern src dst piece
   | src == dst = Left "Cannot choose not to move"
@@ -147,10 +121,6 @@ _move board player src dst =
         >> moveWontCauseCheckOnOwnKing board player src dst piece
           >>= \newBoard -> Right (newBoard, maybeCapture)
 
-within min max n = n >= min && n <= max
-
-letterToNumber c = let column = flip (-) 65 . fromEnum $ toUpper c in if within 0 7 column then Right column else Left $ "Unknown column " ++ [c]
-
 toIndex sq =
   if length sq < 2
     then Left $ "illegal square " ++ sq
@@ -166,49 +136,28 @@ move board player src dst = do
 
 data Status = Winner Color | Stalemate | InProgress deriving (Eq, Show)
 
-data Move = Move Color Integer Integer deriving (Eq, Show)
+data GameState = GS {whoseTurn :: Color, board :: Board, result :: Status, currentTurn :: Integer, captured :: [Piece]} deriving (Eq, Show)
 
-data GameState = GS {whoseTurn :: Color, board :: Board, result :: Status, currentTurn :: Integer, moves :: [Move], captured :: [Piece]} deriving (Eq, Show)
-
-newGame = GS {whoseTurn = White, board = startingBoard, result = InProgress, currentTurn = 0, moves = [], captured = []}
-
-getCharForPiece mp =
-  case mp of
-    Nothing -> '.'
-    Just (Piece color pt) ->
-      let upperWhite clr ch = if clr == White then toUpper ch else ch
-       in upperWhite color $ case pt of
-            Pawn -> 'p'
-            Rook -> 'r'
-            Knight -> 'n'
-            Bishop -> 'b'
-            Queen -> 'q'
-            King -> 'k'
-
-getPrintableRow = map getCharForPiece
-
-getRowsTopFirst board =
-  let getRow n = Vector.toList $ Vector.slice (n * 8) 8 board
-   in reverse $ map getRow [0 .. 7]
+newGame = GS {whoseTurn = White, board = startingBoard, result = InProgress, currentTurn = 0, captured = []}
 
 gameLoop :: StateT GameState IO Status
 gameLoop = do
   state <- S.get
-  _ <- liftIO $ mapM_ (print . getPrintableRow) (getRowsTopFirst (board state))
+  _ <- liftIO $ UI.printBoard (board state)
   case checkmate (board state) of
     Just player -> return $ Winner player
     Nothing ->
       if stalemate (board state) (whoseTurn state)
         then return Stalemate
         else do
-          src <- liftIO $ putStrLn ((show $ whoseTurn state) ++ ", which square to move: ") >> getLine
-          dst <- liftIO $ putStrLn ((show $ whoseTurn state) ++ ", target square: ") >> getLine
+          src <- liftIO $ UI.askSourceSquare (whoseTurn state)
+          dst <- liftIO $ UI.askDestinationSquare (whoseTurn state)
           case move (board state) (whoseTurn state) src dst of
             Left err -> do
-              _ <- liftIO $ print $ "Error: " ++ err
+              _ <- liftIO $ UI.printError err
               gameLoop
             Right (newBoard, maybeCapture) -> do
-              put $ state {board = newBoard, whoseTurn = if whoseTurn state == White then Black else White, captured = maybe (captured state) (: captured state) maybeCapture}
+              put $ state {board = newBoard, whoseTurn = otherColor (whoseTurn state), captured = maybe (captured state) (: captured state) maybeCapture}
               gameLoop
 
 play = evalStateT gameLoop newGame >>= print
