@@ -96,15 +96,10 @@ canCapture board src dst (Piece color pt1) =
                 else Left "illegal capture"
    in maybe (Left "off the board") _canCapture (board !? dst)
 
-moveWouldNeutralizeCheckIfThereIsOne board player src dst piece =
-  if isCheckOn board player && isCheckOn newBoard player
-    then Left "There is a check on your king, you must neutralize the threat"
-    else Right ()
-  where
-    newBoard = Vector.update board (Vector.fromList [(src, Nothing), (dst, Just piece)])
-
-moveWontCauseCheckOnOwnKing board player src dst piece =
-  if isCheckOn newBoard player then Left "Illegal move: player's own king would be exposed" else Right newBoard
+moveDoesNotLeaveKingExposed board player src dst piece =
+  if isCheckOn newBoard player
+    then Left $ if isCheckOn board player then "There is a check on your king, you must neutralize the threat" else "Illegal move: player's own king would be exposed"
+    else Right newBoard
   where
     newBoard = Vector.update board (Vector.fromList [(src, Nothing), (dst, Just piece)])
 
@@ -117,9 +112,8 @@ _move board player src dst =
     >>= destinationNotOccupiedByOwnPiece board dst
     >>= canCapture board src dst
     >>= \(piece, maybeCapture) ->
-      moveWouldNeutralizeCheckIfThereIsOne board player src dst piece
-        >> moveWontCauseCheckOnOwnKing board player src dst piece
-          >>= \newBoard -> Right (newBoard, maybeCapture)
+      moveDoesNotLeaveKingExposed board player src dst piece
+        >>= \newBoard -> Right (newBoard, maybeCapture)
 
 toIndex sq =
   if length sq < 2
