@@ -8,6 +8,7 @@ oneDown src dst = src - dst == 8
 
 diagonalOneDown src dst = src `div` 8 - dst `div` 8 == 1 && abs (src `mod` 8 - dst `mod` 8) == 1
 
+diagonalOneUp :: Integral a => a -> a -> Bool
 diagonalOneUp src dst = src `div` 8 - dst `div` 8 == -1 && abs (src `mod` 8 - dst `mod` 8) == 1
 
 twoDownBlackPawn src dst = src `div` 8 == 6 && src - dst == 16
@@ -25,6 +26,8 @@ diagonalMove src dst = abs (src `mod` 8 - dst `mod` 8) == abs (src `div` 8 - dst
 kingMove src dst = src /= dst && abs (src `div` 8 - dst `div` 8) < 2 && abs (src `mod` 8 - dst `mod` 8) < 2
 
 knightMove src dst = abs (src `div` 8 - dst `div` 8) == 2 && abs (src `mod` 8 - dst `mod` 8) == 1 || abs (src `div` 8 - dst `div` 8) == 1 && abs (src `mod` 8 - dst `mod` 8) == 2
+
+legalPawnNonCaptureMove (Piece color Pawn) src dst = if color == White then oneUp src dst || twoUpWhitePawn src dst else oneDown src dst || twoDownBlackPawn src dst
 
 pawnCapture (Piece color pt) src dst = pt == Pawn && if color == White then diagonalOneUp src dst else diagonalOneDown src dst
 

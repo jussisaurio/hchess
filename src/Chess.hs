@@ -4,7 +4,6 @@
 
 module Chess where
 
-import Control.Applicative ((<|>))
 import Control.Monad.Except (MonadIO (liftIO))
 import qualified Control.Monad.State as S
 import Control.Monad.Trans.State (StateT, evalStateT, put)
@@ -14,6 +13,7 @@ import Data.List (find)
 import Data.Maybe
 import Data.Vector ((!), (!?))
 import qualified Data.Vector as Vector
+import Debug.Trace
 import LegalMoves
   ( diagonalMove,
     diagonalOneDown,
@@ -23,6 +23,7 @@ import LegalMoves
     knightMove,
     legalCapturePatterns,
     legalMovementPatterns,
+    legalPawnNonCaptureMove,
     oneDown,
     oneUp,
     pawnCapture,
@@ -49,6 +50,7 @@ startingBoard :: Board
 startingBoard = Vector.fromList $ map (Just . Piece White) bigPiecesRow ++ map (Just . Piece White) pawnsRow ++ replicate 32 Nothing ++ map (Just . Piece Black) pawnsRow ++ map (Just . Piece Black) bigPiecesRow
 
 legalMovementPattern src dst piece
+  | src == dst = Left "Cannot choose not to move"
   | dst < 0 || dst > 63 = Left "off the board"
   | any (\p -> p src dst) $ legalMovementPatterns piece = Right piece
   | otherwise = Left $ "illegal movement pattern for " ++ show piece
@@ -88,20 +90,34 @@ isCheckOn :: Board -> Color -> Bool
 isCheckOn board player =
   (Just player ==) $ (\(Piece c _) -> c) . fromJust . (!) board <$> Vector.find ((<) 0 . length . findOpponentsThreateningSquare board) kingLocations
   where
-    kingLocations = Vector.findIndices (\it -> isJust it && let (Piece c t) = fromJust it in t == King) startingBoard
+    kingLocations = Vector.findIndices (\it -> isJust it && let (Piece c t) = fromJust it in t == King) board
 
 maybeCheck :: Board -> Maybe Color
 maybeCheck board = find (isCheckOn board) [White, Black]
 
-checkmate board = maybe False (const False) $ maybeCheck board -- TODO
+-- TODO Dirty, but it works for now. Refactor later
+canMoveSomewhere board player = Vector.any (\src -> any (isRight . _move board player src) allSquares) pieceIndices
+  where
+    pieceIndices = Vector.findIndices (\mp -> isJust mp && let (Piece color _) = fromJust mp in color == player) board
+    allSquares = [0 .. 63]
+
+otherColor color = if color == White then Black else White
+
+checkmate board = maybeCheck board >>= \player -> if not $ canMoveSomewhere board player then Just $ otherColor player else Nothing
 
 stalemate board = maybe False (const False) $ maybeCheck board -- TODO
 
 -- todo enpassant
 canCapture board src dst (Piece color pt1) =
   let _canCapture = \case
-        Nothing -> Right (Piece color pt1, Nothing)
-        Just (Piece color2 pt2) -> if pt1 /= Pawn || pawnCapture (Piece color pt1) src dst then Right (Piece color pt1, Just $ Piece color2 pt2) else Left "illegal capture"
+        Nothing -> if pt1 /= Pawn || legalPawnNonCaptureMove (Piece color pt1) src dst then Right (Piece color pt1, Nothing) else Left "illegal move"
+        Just (Piece color2 pt2) ->
+          if pt2 == King
+            then Left "Programmer error, should not be able to capture king in-game"
+            else
+              if pt1 /= Pawn || pawnCapture (Piece color pt1) src dst
+                then Right (Piece color pt1, Just $ Piece color2 pt2)
+                else Left "illegal capture"
    in maybe (Left "off the board") _canCapture (board !? dst)
 
 moveWouldNeutralizeCheckIfThereIsOne board player src dst piece =
