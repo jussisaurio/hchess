@@ -105,7 +105,9 @@ otherColor color = if color == White then Black else White
 
 checkmate board = maybeCheck board >>= \player -> if not $ canMoveSomewhere board player then Just $ otherColor player else Nothing
 
-stalemate board = maybe False (const False) $ maybeCheck board -- TODO
+stalemate board player = case maybeCheck board of
+  (Just _) -> False
+  Nothing -> not $ canMoveSomewhere board player
 
 -- todo enpassant
 canCapture board src dst (Piece color pt1) =
@@ -196,7 +198,7 @@ gameLoop = do
   case checkmate (board state) of
     Just player -> return $ Winner player
     Nothing ->
-      if stalemate (board state)
+      if stalemate (board state) (whoseTurn state)
         then return Stalemate
         else do
           src <- liftIO $ putStrLn ((show $ whoseTurn state) ++ ", which square to move: ") >> getLine
