@@ -69,11 +69,27 @@ isCheckOn board player =
 maybeCheck :: Board -> Maybe Color
 maybeCheck board = find (isCheckOn board) [White, Black]
 
+tryMove board player piece src unrestricted (xdiff, ydiff) =
+  let go dst' acc
+        | dst' < 0 || dst' > 63 = acc
+        | isRight $ _move board player src dst' =
+          if unrestricted
+            then go (dst' + (ydiff * 8) + xdiff) ((piece, src, dst') : acc)
+            else [(piece, src, dst')]
+        | otherwise = acc
+   in go (src + (ydiff * 8) + xdiff) []
+
+possibleMovesFor board player (Piece color pt) src =
+  let (vectors, unrestricted) = unitVectorsFor piece isUnmovedPawn
+      isUnmovedPawn = pt == Pawn && src `div` 8 == if color == White then 1 else 6
+      piece = Piece color pt
+      moves = concatMap (tryMove board player piece src unrestricted) vectors
+   in moves
+
 -- TODO Dirty, but it works for now. Refactor later
-canMoveSomewhere board player = Vector.any (\src -> any (isRight . _move board player src) allSquares) pieceIndices
+canMoveSomewhere board player = (<) 0 . length $ Vector.filter (\(pc, src) -> not $ null $ possibleMovesFor board player pc src) piecesAndSquares
   where
-    pieceIndices = Vector.findIndices (\mp -> isJust mp && let (Piece color _) = fromJust mp in color == player) board
-    allSquares = [0 .. 63]
+    piecesAndSquares = Vector.map (\i -> (fromJust $ board ! i, i)) . Vector.findIndices (\mp -> isJust mp && let (Piece color _) = fromJust mp in color == player) $ board
 
 otherColor color = if color == White then Black else White
 

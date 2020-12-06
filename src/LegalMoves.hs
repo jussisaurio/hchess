@@ -38,21 +38,22 @@ getUnitVector src dst = (if xdiff == 0 then xdiff else xdiff `div` abs xdiff, if
 
 combineTuple (f1, s1) (f2, s2) = (f1 + f2, s1 + s2)
 
+upUV :: (Int, Int)
 upUV = (0, 1)
 
 downUV = (0, -1)
 
-leftUV = (0, -1)
+leftUV = (-1, 0)
 
-rightUV = (0, 1)
+rightUV = (1, 0)
 
-neUV = combineTuple leftUV upUV
+nwUV = combineTuple leftUV upUV
 
-nwUV = combineTuple rightUV upUV
+neUV = combineTuple rightUV upUV
 
-seUV = combineTuple leftUV downUV
+swUV = combineTuple leftUV downUV
 
-swUV = combineTuple rightUV downUV
+seUV = combineTuple rightUV downUV
 
 diagonalUVs = [neUV, nwUV, seUV, swUV]
 
@@ -60,7 +61,17 @@ horizontalUVs = [leftUV, rightUV]
 
 verticalUVs = [upUV, downUV]
 
-horizontalUnitVector = (1, 0)
+knightUVs = [(-2, 1), (-2, -1), (2, 1), (2, -1), (1, -2), (1, 2), (-1, -2), (-1, 2)]
+
+unitVectorsFor (Piece color pt) isUnmovedPawn =
+  case (color, pt) of
+    (White, Pawn) -> if not isUnmovedPawn then ([upUV, neUV, nwUV], False) else ([upUV, neUV, nwUV, (0, 2)], False)
+    (Black, Pawn) -> if not isUnmovedPawn then ([downUV, seUV, swUV], False) else ([downUV, seUV, swUV, (0, -2)], False)
+    (_, Rook) -> (horizontalUVs ++ verticalUVs, True)
+    (_, Knight) -> (knightUVs, False)
+    (_, Bishop) -> (diagonalUVs, True)
+    (_, Queen) -> (horizontalUVs ++ verticalUVs ++ diagonalUVs, True)
+    (_, King) -> (horizontalUVs ++ verticalUVs ++ diagonalUVs, False)
 
 takeStep src dst = let (xstep, ystep) = getUnitVector src dst in src + xstep + ystep * 8
 
