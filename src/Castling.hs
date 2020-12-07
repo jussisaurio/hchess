@@ -9,7 +9,7 @@ tryCastle :: Board -> Piece -> [Move] -> Side -> Either String Piece
 tryCastle board (Piece color pt) moves side
   | kingHasMoved moves color = Left "king has already moved, cannot castle"
   | rookhasMoved moves color side = Left "rook has already moved, cannot castle"
-  | any (\(p, s) -> any (canReachSquare board s) criticalSquares) opponentPieces = Left "opponent is threatening square, cannot castle"
+  | any (\(p, s) -> any (flip (canReachSquare board) s) criticalSquares) opponentPieces = Left "opponent is threatening square, cannot castle"
   | otherwise = Right piece
   where
     piece = Piece color pt

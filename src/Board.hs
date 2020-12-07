@@ -12,6 +12,7 @@ import Pieces
   ( Color (..),
     Piece (..),
     PieceType (Bishop, King, Knight, Pawn, Queen, Rook),
+    otherColor,
   )
 
 type Board = Vector.Vector (Maybe Piece)
@@ -54,11 +55,11 @@ enpassant move = pt == Pawn && pawnFirstMove && pawnDidDoubleMove
     pawnDidDoubleMove = pawnFirstMove && dst move `div` 8 == if color == White then 3 else 4
 
 findOpponentsThreateningSquare :: Board -> Int -> [Piece]
-findOpponentsThreateningSquare board sqr = Vector.toList $ Vector.map (fromJust . (!) board) . Vector.filter (canReachSquare board sqr) $ opponentIndices
+findOpponentsThreateningSquare board sqr = map (fromJust . (!) board) . filter (canReachSquare board sqr) $ map snd opponentPieces
   where
     (Piece kingColor _) = fromJust $ board ! sqr
-    opponentColor = if kingColor == White then Black else White
-    opponentIndices = Vector.findIndices (\sq -> isJust sq && let (Piece c t) = fromJust sq in c == opponentColor) board
+    opponentColor = otherColor kingColor
+    opponentPieces = allPieces board opponentColor
 
 destinationNotOccupiedByOwnPiece :: Vector (Maybe Piece) -> Int -> Piece -> Either [Char] Piece
 destinationNotOccupiedByOwnPiece board dst (Piece color pt) =
