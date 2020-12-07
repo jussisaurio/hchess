@@ -136,24 +136,35 @@ data GameState = GS {whoseTurn :: Color, board :: Board, result :: Status, curre
 
 newGame = GS {whoseTurn = White, board = startingBoard, result = InProgress, currentTurn = 0, moves = [], captured = []}
 
-gameLoop :: StateT GameState IO Status
-gameLoop = do
+interactive i a b = if i then liftIO a else pure b
+
+type HumanReadableMove = (String, String)
+
+gameLoop :: Maybe [HumanReadableMove] -> StateT GameState IO Status
+gameLoop maybeMovelist = do
+  let isInteractive = isNothing maybeMovelist
+  let ifInteractive = interactive isInteractive
   state <- S.get
-  _ <- liftIO $ UI.printBoard (board state)
+  _ <- ifInteractive (UI.printBoard (board state)) ()
   case checkmate state of
     Just player -> return $ Winner player
     Nothing ->
       if stalemate state
         then return Stalemate
-        else do
-          src <- liftIO $ UI.askSourceSquare (whoseTurn state)
-          dst <- liftIO $ UI.askDestinationSquare (whoseTurn state)
-          case move state src dst of
-            Left err -> do
-              _ <- liftIO $ UI.printError err
-              gameLoop
-            Right (newBoard, move, maybeCapture) -> do
-              put $ state {board = newBoard, whoseTurn = otherColor (whoseTurn state), moves = move : moves state, captured = maybe (captured state) ((: captured state) . fst) maybeCapture}
-              gameLoop
+        else
+          if not isInteractive && Just [] == maybeMovelist
+            then return InProgress
+            else do
+              src <- ifInteractive (UI.askSourceSquare (whoseTurn state)) (fst . head . fromJust $ maybeMovelist)
+              dst <- ifInteractive (UI.askDestinationSquare (whoseTurn state)) (snd . head . fromJust $ maybeMovelist)
+              case move state src dst of
+                Left err -> do
+                  _ <- liftIO $ UI.printError err
+                  if not isInteractive then return InProgress else gameLoop Nothing
+                Right (newBoard, move, maybeCapture) -> do
+                  put $ state {board = newBoard, whoseTurn = otherColor (whoseTurn state), moves = move : moves state, captured = maybe (captured state) ((: captured state) . fst) maybeCapture}
+                  gameLoop (tail <$> maybeMovelist)
 
-play = evalStateT gameLoop newGame >>= print
+play = evalStateT (gameLoop Nothing) newGame >>= print
+
+playWithPremoves moves = evalStateT (gameLoop $ Just moves) newGame >>= print
