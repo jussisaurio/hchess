@@ -130,41 +130,40 @@ move state src dst = do
   dst' <- toIndex dst
   _move state src' dst'
 
-data Status = Winner Color | Stalemate | InProgress deriving (Eq, Show)
+data Status = Winner Color | Stalemate | InProgress | DidNotFinish | Error String deriving (Eq, Show)
 
 data GameState = GS {whoseTurn :: Color, board :: Board, result :: Status, currentTurn :: Integer, moves :: [Move], captured :: [Piece]} deriving (Eq, Show)
 
 newGame = GS {whoseTurn = White, board = startingBoard, result = InProgress, currentTurn = 0, moves = [], captured = []}
 
-interactive i a b = if i then liftIO a else pure b
+interactive i a b = if i then a else pure b
 
 type HumanReadableMove = (String, String)
 
-gameLoop :: Maybe [HumanReadableMove] -> StateT GameState IO Status
-gameLoop maybeMovelist = do
+gameLoop :: Maybe [HumanReadableMove] -> GameState -> IO GameState
+gameLoop maybeMovelist state = do
   let isInteractive = isNothing maybeMovelist
   let ifInteractive = interactive isInteractive
-  state <- S.get
-  _ <- ifInteractive (UI.printBoard (board state)) ()
+  ifInteractive (UI.printBoard (board state)) ()
   case checkmate state of
-    Just player -> return $ Winner player
+    Just player -> return state {result = Winner player}
     Nothing ->
       if stalemate state
-        then return Stalemate
+        then return state {result = Stalemate}
         else
           if not isInteractive && Just [] == maybeMovelist
-            then return InProgress
+            then return state {result = DidNotFinish}
             else do
               src <- ifInteractive (UI.askSourceSquare (whoseTurn state)) (fst . head . fromJust $ maybeMovelist)
               dst <- ifInteractive (UI.askDestinationSquare (whoseTurn state)) (snd . head . fromJust $ maybeMovelist)
               case move state src dst of
                 Left err -> do
-                  _ <- liftIO $ UI.printError err
-                  if not isInteractive then return InProgress else gameLoop Nothing
+                  UI.printError err
+                  if not isInteractive then return state {result = Error err} else gameLoop Nothing state
                 Right (newBoard, move, maybeCapture) -> do
-                  put $ state {board = newBoard, whoseTurn = otherColor (whoseTurn state), moves = move : moves state, captured = maybe (captured state) ((: captured state) . fst) maybeCapture}
-                  gameLoop (tail <$> maybeMovelist)
+                  let newState = state {board = newBoard, whoseTurn = otherColor (whoseTurn state), moves = move : moves state, captured = maybe (captured state) ((: captured state) . fst) maybeCapture}
+                  gameLoop (tail <$> maybeMovelist) newState
 
-play = evalStateT (gameLoop Nothing) newGame >>= print
+play = gameLoop Nothing newGame >>= print
 
-playWithPremoves moves = evalStateT (gameLoop $ Just moves) newGame >>= print
+playWithPremoves moves = gameLoop (Just moves) newGame >>= print
