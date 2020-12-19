@@ -1,5 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
 module Chess where
@@ -19,7 +21,7 @@ import LegalMoves
 import Pieces
   ( Color (..),
     Piece (..),
-    PieceType (King, Pawn, Rook),
+    PieceType (Bishop, King, Knight, Pawn, Queen, Rook),
     isOwnPiece,
     otherColor,
   )
@@ -130,6 +132,21 @@ move state src dst = do
   dst' <- toIndex dst
   _move state src' dst'
 
+eligibleForPromotion :: Board -> Color -> Maybe (Piece, Int)
+eligibleForPromotion board color = Vector.find (\(Piece color' pt, i) -> color == color' && pt == Pawn && isPromotionRow i color') . Vector.mapMaybe (\(m, i) -> m >>= Just . (,i)) $ Vector.zip board (Vector.fromList [0 .. 63])
+  where
+    isPromotionRow i color = color == White && i `div` 8 == 7 || color == Black && i `div` 8 == 0
+
+promote :: Board -> Int -> String -> Board
+promote b idx choice
+  | choice == "Q" = convertTo Queen
+  | choice == "R" = convertTo Rook
+  | choice == "K" = convertTo Knight
+  | choice == "B" = convertTo Bishop
+  | otherwise = error "Programmer error"
+  where
+    convertTo pt = let (Piece color _) = fromJust $ b ! idx in Vector.update b [(idx, Just $ Piece color pt)]
+
 data Status = Winner Color | Stalemate | InProgress | DidNotFinish | Error String deriving (Eq, Show)
 
 data GameState = GS {whoseTurn :: Color, board :: Board, result :: Status, currentTurn :: Integer, moves :: [Move], captured :: [Piece]} deriving (Eq, Show)
@@ -154,15 +171,24 @@ gameLoop maybeMovelist state = do
           if not isInteractive && Just [] == maybeMovelist
             then return state {result = DidNotFinish}
             else do
-              src <- ifInteractive (UI.askSourceSquare (whoseTurn state)) (fst . head . fromJust $ maybeMovelist)
-              dst <- ifInteractive (UI.askDestinationSquare (whoseTurn state)) (snd . head . fromJust $ maybeMovelist)
-              case move state src dst of
-                Left err -> do
-                  UI.printError err
-                  if not isInteractive then return state {result = Error err} else gameLoop Nothing state
-                Right (newBoard, move, maybeCapture) -> do
-                  let newState = state {board = newBoard, whoseTurn = otherColor (whoseTurn state), moves = move : moves state, captured = maybe (captured state) ((: captured state) . fst) maybeCapture}
-                  gameLoop (tail <$> maybeMovelist) newState
+              case eligibleForPromotion (board state) (otherColor $ whoseTurn state) of
+                Just (piece, idx) -> do
+                  choice <- ifInteractive (UI.askPromotion (otherColor $ whoseTurn state)) (fst . head . fromJust $ maybeMovelist)
+                  if choice `elem` (["Q", "R", "B", "K"] :: [String])
+                    then gameLoop (tail <$> maybeMovelist) state {board = promote (board state) idx choice}
+                    else do
+                      UI.printError "Invalid promotion choice"
+                      if not isInteractive then return state {result = Error "Invalid promotion choice"} else gameLoop Nothing state
+                Nothing -> do
+                  src <- ifInteractive (UI.askSourceSquare (whoseTurn state)) (fst . head . fromJust $ maybeMovelist)
+                  dst <- ifInteractive (UI.askDestinationSquare (whoseTurn state)) (snd . head . fromJust $ maybeMovelist)
+                  case move state src dst of
+                    Left err -> do
+                      UI.printError err
+                      if not isInteractive then return state {result = Error err} else gameLoop Nothing state
+                    Right (newBoard, move, maybeCapture) -> do
+                      let newState = state {board = newBoard, whoseTurn = otherColor (whoseTurn state), moves = move : moves state, captured = maybe (captured state) ((: captured state) . fst) maybeCapture}
+                      gameLoop (tail <$> maybeMovelist) newState
 
 play = gameLoop Nothing newGame >>= print
 

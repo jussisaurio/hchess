@@ -1,4 +1,4 @@
-module UI (askSourceSquare, askDestinationSquare, printError, printBoard) where
+module UI (askSourceSquare, askDestinationSquare, askPromotion, printError, printBoard) where
 
 import Data.Char (toUpper)
 import qualified Data.Vector as Vector
@@ -13,6 +13,8 @@ printBoard board = mapM_ (print . getPrintableRow) (getRowsTopFirst board)
 askSourceSquare player = getInputWithPrompt $ show player ++ ", which square to move: "
 
 askDestinationSquare player = getInputWithPrompt $ show player ++ ", target square: "
+
+askPromotion player = getInputWithPrompt $ show player ++ ", choose what to promote to (Q, R, B, K): "
 
 printError err = print $ "Error: " ++ err
 
