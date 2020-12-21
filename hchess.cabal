@@ -31,7 +31,13 @@ library
   other-modules:
       Paths_hchess
       LegalMoves
-      Pieces
+      Pieces,
+      Board,
+      Castling,
+      UI,
+      Helpers,
+      Parser,
+      MoveParser
   hs-source-dirs:
       src
   build-depends:
